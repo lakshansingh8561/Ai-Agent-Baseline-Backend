@@ -1,0 +1,5 @@
+export const AUTH_CONSTANTS = {
+  MIN_PASSWORD_LENGTH: 8,
+  MAX_PASSWORD_LENGTH: 128,
+  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "7d",
+} as const;
