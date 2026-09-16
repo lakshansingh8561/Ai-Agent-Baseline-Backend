@@ -6,6 +6,7 @@ import {
   sendMessage,
   ChatError,
 } from "./chat.service.js";
+import { TokenError, InsufficientTokensError } from "../token/index.js";
 import {
   createConversationSchema,
   sendMessageSchema,
@@ -206,6 +207,25 @@ export const sendMessageHandler = async (
     });
   } catch (error) {
     console.error("Send message error:", error);
+
+    if (
+      error instanceof InsufficientTokensError ||
+      (error as any).statusCode === 402
+    ) {
+      res.status(402).json({
+        success: false,
+        message: "Token balance exhausted",
+      });
+      return;
+    }
+
+    if (error instanceof TokenError) {
+      res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
 
     if (error instanceof ChatError) {
       res.status(error.statusCode).json({

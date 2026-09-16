@@ -4,7 +4,7 @@ import {
   loginUser,
   getMe,
 } from "./auth.controller.js";
-import { authMiddleware } from "../../middlewares/auth.middleware.js";
+import { authMiddleware } from "../../constants/middleware/auth.middleware.js";
 
 const router = Router();
 
