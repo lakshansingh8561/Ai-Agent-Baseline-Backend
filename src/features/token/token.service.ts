@@ -9,6 +9,7 @@ import {
   TokenInvariantViolationError,
 } from "./token.errors.js";
 import type { TokenReservation, ActualUsageData, FinalizeTokenUsageOptions } from "./token.types.js";
+import type { TokenBalanceDTO } from "./token.dto.js";
 
 /**
  * Retrieves the token wallet for a user, or creates one if it doesn't exist.
@@ -255,3 +256,28 @@ export const finalizeTokenUsage = async (
     await session.endSession();
   }
 };
+
+/**
+ * Retrieves the current token balance for an authenticated user.
+ * If the wallet does not exist, throws TokenWalletNotFoundError.
+ * Does not silently create a wallet.
+ */
+export const getUserTokenBalance = async (
+  userId: string | Types.ObjectId
+): Promise<TokenBalanceDTO> => {
+  const objectId = typeof userId === "string" ? new Types.ObjectId(userId) : userId;
+
+  const wallet = await TokenWallet.findOne({ userId: objectId });
+
+  if (!wallet) {
+    throw new TokenWalletNotFoundError("Token wallet not found for user");
+  }
+
+  return {
+    balance: wallet.balance,
+    totalAllocated: wallet.totalAllocated,
+    totalUsed: wallet.totalUsed,
+    reservedTokens: wallet.reservedTokens,
+  };
+};
+
