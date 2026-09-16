@@ -111,6 +111,7 @@ export const register = async (input: RegisterInput): Promise<AuthResponse> => {
           balance: 10000,
           totalAllocated: 10000,
           totalUsed: 0,
+          reservedTokens: 0,
         },
       ],
       { session }

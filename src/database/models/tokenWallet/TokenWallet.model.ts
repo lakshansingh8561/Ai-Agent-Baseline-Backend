@@ -30,6 +30,13 @@ const tokenWalletSchema = new Schema<ITokenWalletDocument>(
       default: 0,
       min: 0,
     },
+
+    reservedTokens: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
   },
   {
     timestamps: true,

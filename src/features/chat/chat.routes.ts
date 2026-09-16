@@ -5,7 +5,7 @@ import {
   getConversationMessagesHandler,
   sendMessageHandler,
 } from "./chat.controller.js";
-import { authMiddleware } from "../../middlewares/auth.middleware.js";
+import { authMiddleware } from "../../constants/middleware/auth.middleware.js";
 
 const router = Router();
 
