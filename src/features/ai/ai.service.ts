@@ -10,9 +10,9 @@ const ai = new GoogleGenAI({
   apiKey,
 });
 
-export const PRIMARY_MODEL = "gemini-3.8-flash";
-export const FALLBACK_MODEL = "gemini-3.7-flash";
-export const SECONDARY_FALLBACK_MODEL = "gemini-3.6-flash";
+export const PRIMARY_MODEL = "gemini-3.6-flash";
+export const FALLBACK_MODEL = "gemini-3.1-flash-lite";
+export const SECONDARY_FALLBACK_MODEL = "gemini-3.5-flash";
 
 export interface AIResponseWithUsage {
   text: string;
@@ -62,7 +62,9 @@ export const generateAIResponseWithUsage = async (
   prompt: string,
   maxOutputTokens?: number
 ): Promise<AIResponseWithUsage> => {
-  const config = maxOutputTokens ? { maxOutputTokens } : undefined;
+  const config = maxOutputTokens
+    ? { maxOutputTokens, thinkingConfig: { thinkingBudget: 0 } }
+    : undefined;
 
   try {
     const response = await ai.models.generateContent({
