@@ -4,3 +4,5 @@ export * from "./subscription.dto.js";
 export * from "./subscription.service.js";
 export * from "./subscription.controller.js";
 export * from "./subscription.webhook.js";
+export * from "./polar.client.js";
+

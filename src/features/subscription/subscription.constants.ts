@@ -23,7 +23,9 @@ export const SUBSCRIPTION_STATUS = {
   ACTIVE: "active",
   CANCELLED: "cancelled",
   EXPIRED: "expired",
+  PAST_DUE: "past_due",
 } as const;
+
 
 export const SUBSCRIPTION_PROVIDER = {
   NONE: "none",
