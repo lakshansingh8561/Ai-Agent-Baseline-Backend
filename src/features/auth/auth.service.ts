@@ -3,6 +3,7 @@ import jwt, { type SignOptions } from "jsonwebtoken";
 import mongoose from "mongoose";
 import { User } from "../../database/models/user/index.js";
 import { TokenWallet } from "../../database/models/tokenWallet/index.js";
+import { createInitialFreeSubscription } from "../subscription/subscription.service.js";
 import { AUTH_CONSTANTS } from "./auth.constants.js";
 import type { JWTPayload } from "./auth.types.js";
 
@@ -116,6 +117,8 @@ export const register = async (input: RegisterInput): Promise<AuthResponse> => {
       ],
       { session }
     );
+
+    await createInitialFreeSubscription(user._id, session);
 
     await session.commitTransaction();
 
