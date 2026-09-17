@@ -4,12 +4,15 @@ import {
   WebhookVerificationError,
 } from "@polar-sh/sdk/webhooks";
 
+import { syncPolarSubscriptionEvent } from "./subscription.service.js";
+
 export interface ProcessedWebhookResult {
   eventType: string;
   webhookDeliveryId: string | null;
   providerSubscriptionId: string | null;
   received: boolean;
 }
+
 
 /**
  * Validates and handles incoming Polar webhook events using official @polar-sh/sdk.
@@ -124,30 +127,41 @@ export const handlePolarWebhook = async (
   });
 
   // Safe event processing for supported subscription lifecycle events
-  // Note: Phase 7B only validates & acknowledges; NO tokens are allocated, TokenWallet is untouched
-  switch (event.type) {
-    case "subscription.created":
-    case "subscription.active":
-    case "subscription.updated":
-    case "subscription.canceled":
-    case "subscription.uncanceled":
-    case "subscription.revoked":
-    case "subscription.past_due":
-      // Acknowledged without mutating TokenWallet
-      break;
-    default:
-      // Non-subscription events (e.g. order.*, customer.*) safely acknowledged
-      break;
+  // Note: Phase 7C synchronizes Subscription and User.plan; strictly zero token allocation, TokenWallet untouched
+  let syncResult: any = null;
+  const isSubscriptionEvent = [
+    "subscription.created",
+    "subscription.active",
+    "subscription.updated",
+    "subscription.canceled",
+    "subscription.uncanceled",
+    "subscription.revoked",
+    "subscription.past_due",
+  ].includes(event.type);
+
+  if (isSubscriptionEvent && event.data) {
+    try {
+      syncResult = await syncPolarSubscriptionEvent(event, webhookDeliveryId);
+    } catch (syncError: any) {
+      console.error("[Polar Webhook] Subscription synchronization failed:", syncError);
+      res.status(500).json({
+        success: false,
+        message: "Failed to synchronize subscription state",
+      });
+      return;
+    }
   }
 
   res.status(200).json({
     success: true,
-    message: "Webhook processed successfully",
+    message: syncResult?.message || "Webhook processed successfully",
     data: {
       eventType: event.type,
       webhookDeliveryId,
       providerSubscriptionId,
       received: true,
+      syncResult,
     },
   });
 };
+

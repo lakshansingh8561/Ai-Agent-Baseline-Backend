@@ -1,5 +1,8 @@
 import { Router } from "express";
-import { getUserSubscriptionHandler } from "./subscription.controller.js";
+import {
+  getUserSubscriptionHandler,
+  createProCheckoutSessionHandler,
+} from "./subscription.controller.js";
 import { handlePolarWebhook } from "./subscription.webhook.js";
 import { authMiddleware } from "../../constants/middleware/auth.middleware.js";
 
@@ -10,5 +13,7 @@ router.post("/webhook", handlePolarWebhook);
 
 // Protected subscription endpoints requiring user JWT
 router.get("/me", authMiddleware, getUserSubscriptionHandler);
+router.post("/checkout", authMiddleware, createProCheckoutSessionHandler);
 
 export default router;
+

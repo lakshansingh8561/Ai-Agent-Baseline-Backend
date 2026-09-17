@@ -28,3 +28,17 @@ export interface SubscriptionResponse {
   message?: string;
   data: SafeSubscription;
 }
+
+export interface SafeCheckoutSession {
+  checkoutUrl: string;
+  id?: string;
+  status?: string;
+  expiresAt?: Date | null;
+}
+
+export interface CheckoutSessionResponse {
+  success: boolean;
+  message?: string;
+  data: SafeCheckoutSession;
+}
+

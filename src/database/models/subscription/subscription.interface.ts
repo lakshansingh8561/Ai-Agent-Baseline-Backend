@@ -2,7 +2,11 @@ import type { Document, Types } from "mongoose";
 
 export type SubscriptionPlan = "free" | "pro";
 
-export type SubscriptionStatus = "active" | "cancelled" | "expired";
+export type SubscriptionStatus =
+  | "active"
+  | "cancelled"
+  | "expired"
+  | "past_due";
 
 export type SubscriptionProvider = "none" | "polar";
 
@@ -19,7 +23,9 @@ export interface ISubscription {
   currentPeriodStart: Date;
   currentPeriodEnd?: Date | null;
   cancelAtPeriodEnd: boolean;
+  lastWebhookEventId?: string | null;
 }
+
 
 export interface ISubscriptionDocument extends ISubscription, Document {
   createdAt: Date;

@@ -17,7 +17,7 @@ const subscriptionSchema = new Schema<ISubscriptionDocument>(
     },
     status: {
       type: String,
-      enum: ["active", "cancelled", "expired"],
+      enum: ["active", "cancelled", "expired", "past_due"],
       default: "active",
       required: true,
       index: true,
@@ -63,6 +63,10 @@ const subscriptionSchema = new Schema<ISubscriptionDocument>(
       default: false,
       required: true,
     },
+    lastWebhookEventId: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -72,13 +76,14 @@ const subscriptionSchema = new Schema<ISubscriptionDocument>(
 // Compound index for active user subscription lookup
 subscriptionSchema.index({ userId: 1, status: 1 });
 
-// Sparse index for future Polar subscription lookups
+// Unique sparse index for Polar subscription idempotency & lookup
 subscriptionSchema.index(
   { providerSubscriptionId: 1 },
-  { sparse: true }
+  { unique: true, sparse: true }
 );
 
 export const Subscription = model<ISubscriptionDocument>(
   "Subscription",
   subscriptionSchema
 );
+
