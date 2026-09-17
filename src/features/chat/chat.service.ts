@@ -5,6 +5,7 @@ import {
   generateAIResponseWithUsage,
   countPromptTokens,
   type AIResponseWithUsage,
+  type GeminiContent,
 } from "../ai/ai.service.js";
 import {
   reserveTokenBudget,
@@ -28,6 +29,26 @@ export class ChatError extends Error {
     this.statusCode = statusCode;
   }
 }
+
+export const findUserConversationById = async (
+  conversationId: string,
+  userId: string
+) => {
+  if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+    throw new ChatError("Invalid conversation ID format", 400);
+  }
+
+  const conversation = await Conversation.findOne({
+    _id: new mongoose.Types.ObjectId(conversationId),
+    userId: new mongoose.Types.ObjectId(userId),
+  });
+
+  if (!conversation) {
+    throw new ChatError("Conversation not found", 404);
+  }
+
+  return conversation;
+};
 
 export const createConversation = async (
   userId: string,
@@ -70,18 +91,7 @@ export const getConversationMessages = async (
   userId: string,
   conversationId: string
 ): Promise<SafeMessage[]> => {
-  if (!mongoose.Types.ObjectId.isValid(conversationId)) {
-    throw new ChatError("Invalid conversation ID format", 400);
-  }
-
-  const conversation = await Conversation.findOne({
-    _id: new mongoose.Types.ObjectId(conversationId),
-    userId: new mongoose.Types.ObjectId(userId),
-  });
-
-  if (!conversation) {
-    throw new ChatError("Conversation not found", 404);
-  }
+  await findUserConversationById(conversationId, userId);
 
   const messages = await Message.find({
     conversationId: new mongoose.Types.ObjectId(conversationId),
@@ -107,29 +117,47 @@ export const sendMessage = async (
   conversationId: string,
   content: string
 ): Promise<SendMessageResponse> => {
-  if (!mongoose.Types.ObjectId.isValid(conversationId)) {
-    throw new ChatError("Invalid conversation ID format", 400);
+  const conversation = await findUserConversationById(conversationId, userId);
+
+  // 1. Fetch persisted conversation history from MongoDB in chronological order
+  const existingMessages = await Message.find({
+    conversationId: conversation._id,
+  })
+    .sort({ createdAt: 1 })
+    .lean();
+
+  // Apply deterministic context window (newest messages up to MAX_CONTEXT_MESSAGES)
+  const historySlice = existingMessages.slice(-CHAT_CONSTANTS.MAX_CONTEXT_MESSAGES);
+  const geminiContents: GeminiContent[] = [];
+
+  for (const msg of historySlice) {
+    geminiContents.push({
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: msg.content }],
+    });
   }
 
-  const conversation = await Conversation.findOne({
-    _id: new mongoose.Types.ObjectId(conversationId),
-    userId: new mongoose.Types.ObjectId(userId),
+  // Ensure window does not start with an orphaned model message if history was truncated
+  while (geminiContents.length > 0 && geminiContents[0].role === "model") {
+    geminiContents.shift();
+  }
+
+  // Append new user message as the latest turn exactly once
+  geminiContents.push({
+    role: "user",
+    parts: [{ text: content }],
   });
 
-  if (!conversation) {
-    throw new ChatError("Conversation not found", 404);
-  }
+  // 2. Count exact input tokens for the prompt including conversation context
+  const inputTokens = await _internalAI.countPromptTokens(geminiContents);
 
-  // 1. Count exact input tokens for the prompt
-  const inputTokens = await _internalAI.countPromptTokens(content);
-
-  // 2. Atomically reserve token budget
+  // 3. Atomically reserve token budget based on actual context
   const { reservedAmount, allowedOutputTokens } = await reserveTokenBudget(
     userId,
     inputTokens
   );
 
-  // 3. Persist user message
+  // 4. Persist user message
   const userMessage = await Message.create({
     conversationId: conversation._id,
     userId: new mongoose.Types.ObjectId(userId),
@@ -137,11 +165,11 @@ export const sendMessage = async (
     content,
   });
 
-  // 4. Call Gemini with exact allowedOutputTokens
+  // 5. Call Gemini with conversation history and exact allowedOutputTokens
   let aiResult: AIResponseWithUsage;
 
   try {
-    aiResult = await _internalAI.generateAIResponseWithUsage(content, allowedOutputTokens);
+    aiResult = await _internalAI.generateAIResponseWithUsage(geminiContents, allowedOutputTokens);
   } catch (aiError) {
     console.error("Gemini invocation failed in chat service:", aiError);
     // Release reservation on AI generation failure

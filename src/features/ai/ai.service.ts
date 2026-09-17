@@ -14,6 +14,15 @@ export const PRIMARY_MODEL = "gemini-3.6-flash";
 export const FALLBACK_MODEL = "gemini-3.1-flash-lite";
 export const SECONDARY_FALLBACK_MODEL = "gemini-3.5-flash";
 
+export interface GeminiContentPart {
+  text: string;
+}
+
+export interface GeminiContent {
+  role: "user" | "model";
+  parts: GeminiContentPart[];
+}
+
 export interface AIResponseWithUsage {
   text: string;
   model: string;
@@ -23,10 +32,10 @@ export interface AIResponseWithUsage {
 }
 
 /**
- * Counts exact input tokens for the prompt using Gemini's countTokens API.
+ * Counts exact input tokens for the prompt or multi-turn contents using Gemini's countTokens API.
  */
 export const countPromptTokens = async (
-  prompt: string,
+  prompt: string | GeminiContent[],
   model: string = PRIMARY_MODEL
 ): Promise<number> => {
   try {
@@ -59,7 +68,7 @@ export const countPromptTokens = async (
  * Generates AI content and captures authoritative token usage metadata.
  */
 export const generateAIResponseWithUsage = async (
-  prompt: string,
+  prompt: string | GeminiContent[],
   maxOutputTokens?: number
 ): Promise<AIResponseWithUsage> => {
   const config = maxOutputTokens
