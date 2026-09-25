@@ -172,6 +172,8 @@ export const sendMessage = async (
     aiResult = await _internalAI.generateAIResponseWithUsage(geminiContents, allowedOutputTokens);
   } catch (aiError) {
     console.error("Gemini invocation failed in chat service:", aiError);
+    // Delete the orphaned user message so the database is not corrupted with unanswered prompt
+    await Message.deleteOne({ _id: userMessage._id });
     // Release reservation on AI generation failure
     await releaseTokenReservation(userId, reservedAmount);
     throw new ChatError("Failed to generate AI response", 500);
@@ -182,6 +184,7 @@ export const sendMessage = async (
     console.error(
       `Token accounting invariant violation: actual usage (${aiResult.totalTokens}) exceeded reserved amount (${reservedAmount}) for user ${userId}`
     );
+    await Message.deleteOne({ _id: userMessage._id });
     await releaseTokenReservation(userId, reservedAmount);
     throw new TokenInvariantViolationError(
       `Actual token usage (${aiResult.totalTokens}) exceeded reserved amount (${reservedAmount})`
@@ -272,5 +275,18 @@ export const sendMessage = async (
       updatedAt: (assistantMessageDoc as any).updatedAt,
     },
   };
+};
+
+export const deleteConversation = async (
+  userId: string,
+  conversationId: string
+): Promise<void> => {
+  const conversation = await findUserConversationById(conversationId, userId);
+
+  // Delete all messages belonging to this conversation
+  await Message.deleteMany({ conversationId: conversation._id });
+
+  // Delete the conversation document
+  await Conversation.deleteOne({ _id: conversation._id });
 };
 

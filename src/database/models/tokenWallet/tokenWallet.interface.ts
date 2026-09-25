@@ -6,6 +6,7 @@ export interface ITokenWallet {
   totalAllocated: number;
   totalUsed: number;
   reservedTokens: number;
+  lastAllocatedPlan?: string;
 }
 
 export interface ITokenWalletDocument extends ITokenWallet, Document {}

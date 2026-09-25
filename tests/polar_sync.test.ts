@@ -225,11 +225,11 @@ describe("Polar Subscription Synchronization Test Suite (Phase 7C)", () => {
     assert.equal(sub.providerSubscriptionId, polarSubId);
     assert.notEqual(sub.providerSubscriptionId, deliveryId, "Must NOT store delivery ID as subscription ID");
 
-    // Verify TokenWallet is 100% untouched
+    // Verify TokenWallet has Pro tokens assigned (50,000 tokens)
     const wallet = await TokenWallet.findOne({ userId });
-    assert.equal(wallet?.balance, initialWallet.balance);
-    assert.equal(wallet?.totalAllocated, initialWallet.totalAllocated);
-    assert.equal(wallet?.totalUsed, initialWallet.totalUsed);
+    assert.equal(wallet?.balance, 50000);
+    assert.equal(wallet?.totalAllocated, 50000);
+    assert.equal(wallet?.totalUsed, 0);
   });
 
   test("2. Verified subscription.active updates subscription and keeps User.plan 'pro'", async () => {
@@ -537,7 +537,7 @@ describe("Polar Subscription Synchronization Test Suite (Phase 7C)", () => {
     assert.equal(user?.plan, "pro");
   });
 
-  test("11. Missing explicit NexaMind identity does NOT correlate by email and performs zero database mutations", async () => {
+  test("11. Missing explicit Lumina AI identity does NOT correlate by email and performs zero database mutations", async () => {
     const userId = new mongoose.Types.ObjectId();
     createdUserIds.push(userId);
     const existingUserEmail = `target_no_email_sync_${Date.now()}@example.com`;

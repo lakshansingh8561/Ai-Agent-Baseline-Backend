@@ -2,7 +2,7 @@ import type { Document } from "mongoose";
 
 export type UserRole = "user" | "admin";
 
-export type UserPlan = "free" | "pro";
+export type UserPlan = "free" | "plus" | "pro";
 
 export interface IUser {
   name: string;

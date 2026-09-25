@@ -287,9 +287,9 @@ describe("Polar Checkout Flow Test Suite (Phase 7B)", () => {
         : `https://${frontendUrl}`;
     assert.equal(
       capturedCheckoutArgs.successUrl,
-      `${expectedBaseUrl}/app?checkout=success&checkout_id={CHECKOUT_ID}`
+      `${expectedBaseUrl}/app/billing?checkout=success&checkout_id={CHECKOUT_ID}`
     );
-    assert.equal(capturedCheckoutArgs.returnUrl, `${expectedBaseUrl}/app`);
+    assert.equal(capturedCheckoutArgs.returnUrl, `${expectedBaseUrl}/app/billing`);
   });
 
 

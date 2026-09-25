@@ -1,6 +1,8 @@
 import mongoose, { Types } from "mongoose";
 import { TokenWallet, type ITokenWalletDocument } from "../../database/models/tokenWallet/index.js";
 import { TokenUsage, type ITokenUsageDocument } from "../../database/models/tokenUsage/index.js";
+import { User } from "../../database/models/user/index.js";
+import { SUBSCRIPTION_PLANS } from "../subscription/subscription.constants.js";
 import { TOKEN_CONSTANTS } from "./token.constants.js";
 import {
   TokenError,
@@ -12,6 +14,46 @@ import type { TokenReservation, ActualUsageData, FinalizeTokenUsageOptions } fro
 import type { TokenBalanceDTO } from "./token.dto.js";
 
 /**
+ * Authoritatively allocates tokens for a subscription plan tier.
+ * Pro -> 50,000 tokens
+ * Plus -> 100,000 tokens
+ * Free -> 10,000 tokens
+ */
+export const allocateTokensForPlan = async (
+  userId: string | Types.ObjectId,
+  plan: "free" | "pro" | "plus"
+): Promise<ITokenWalletDocument> => {
+  const objectId = typeof userId === "string" ? new Types.ObjectId(userId) : userId;
+  const targetTokens =
+    SUBSCRIPTION_PLANS[plan]?.tokensPerPeriod ?? TOKEN_CONSTANTS.DEFAULT_FREE_ALLOCATION;
+
+  let wallet = await TokenWallet.findOne({ userId: objectId });
+
+  if (!wallet) {
+    wallet = await TokenWallet.create({
+      userId: objectId,
+      balance: targetTokens,
+      totalAllocated: targetTokens,
+      totalUsed: 0,
+      reservedTokens: 0,
+      lastAllocatedPlan: plan,
+    });
+    return wallet;
+  }
+
+  const reserved = wallet.reservedTokens || 0;
+  const newBalance = Math.max(0, targetTokens - reserved);
+
+  wallet.balance = newBalance;
+  wallet.totalAllocated = Math.max(wallet.totalAllocated, targetTokens);
+  wallet.totalUsed = 0;
+  wallet.lastAllocatedPlan = plan;
+
+  await wallet.save();
+  return wallet;
+};
+
+/**
  * Retrieves the token wallet for a user, or creates one if it doesn't exist.
  */
 export const getOrCreateWallet = async (
@@ -21,14 +63,20 @@ export const getOrCreateWallet = async (
 
   let wallet = await TokenWallet.findOne({ userId: objectId });
 
+  const user = await User.findById(objectId).select("plan").lean();
+  const userPlan = (user?.plan || "free") as "free" | "pro" | "plus";
+  const expectedTokens =
+    SUBSCRIPTION_PLANS[userPlan]?.tokensPerPeriod ?? TOKEN_CONSTANTS.DEFAULT_FREE_ALLOCATION;
+
   if (!wallet) {
     try {
       wallet = await TokenWallet.create({
         userId: objectId,
-        balance: TOKEN_CONSTANTS.DEFAULT_FREE_ALLOCATION,
-        totalAllocated: TOKEN_CONSTANTS.DEFAULT_FREE_ALLOCATION,
+        balance: expectedTokens,
+        totalAllocated: expectedTokens,
         totalUsed: 0,
         reservedTokens: 0,
+        lastAllocatedPlan: userPlan,
       });
     } catch (createError: any) {
       // Handle potential race condition on unique index
@@ -38,6 +86,13 @@ export const getOrCreateWallet = async (
         throw createError;
       }
     }
+  } else if (userPlan !== "free" && wallet.lastAllocatedPlan !== userPlan) {
+    const reserved = wallet.reservedTokens || 0;
+    wallet.balance = Math.max(0, expectedTokens - reserved);
+    wallet.totalAllocated = Math.max(wallet.totalAllocated, expectedTokens);
+    wallet.totalUsed = 0;
+    wallet.lastAllocatedPlan = userPlan;
+    await wallet.save();
   }
 
   if (!wallet) {
@@ -68,7 +123,7 @@ export const reserveTokenBudget = async (
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const wallet = await getOrCreateWallet(objectId);
 
-    if (wallet.balance < minRequiredBudget) {
+    if (wallet.balance <= 0 || wallet.balance < minRequiredBudget) {
       throw new InsufficientTokensError();
     }
 
@@ -271,6 +326,20 @@ export const getUserTokenBalance = async (
 
   if (!wallet) {
     throw new TokenWalletNotFoundError("Token wallet not found for user");
+  }
+
+  const user = await User.findById(objectId).select("plan").lean();
+  const userPlan = (user?.plan || "free") as "free" | "pro" | "plus";
+  const expectedTokens =
+    SUBSCRIPTION_PLANS[userPlan]?.tokensPerPeriod ?? TOKEN_CONSTANTS.DEFAULT_FREE_ALLOCATION;
+
+  if (userPlan !== "free" && wallet.lastAllocatedPlan !== userPlan) {
+    const reserved = wallet.reservedTokens || 0;
+    wallet.balance = Math.max(0, expectedTokens - reserved);
+    wallet.totalAllocated = Math.max(wallet.totalAllocated, expectedTokens);
+    wallet.totalUsed = 0;
+    wallet.lastAllocatedPlan = userPlan;
+    await wallet.save();
   }
 
   return {

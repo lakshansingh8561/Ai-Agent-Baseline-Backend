@@ -4,6 +4,7 @@ import {
   getUserConversations,
   getConversationMessages,
   sendMessage,
+  deleteConversation,
   ChatError,
 } from "./chat.service.js";
 import { TokenError, InsufficientTokensError } from "../token/index.js";
@@ -142,9 +143,12 @@ export const getConversationMessagesHandler = async (
       },
     });
   } catch (error) {
-    console.error("Get conversation messages error:", error);
-
     if (error instanceof ChatError) {
+      if (error.statusCode >= 500) {
+        console.error("Get conversation messages error:", error);
+      } else {
+        console.warn(`[Chat] ${error.message} (${error.statusCode})`);
+      }
       res.status(error.statusCode).json({
         success: false,
         message: error.message,
@@ -152,6 +156,7 @@ export const getConversationMessagesHandler = async (
       return;
     }
 
+    console.error("Get conversation messages error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to retrieve messages",
@@ -238,6 +243,54 @@ export const sendMessageHandler = async (
     res.status(500).json({
       success: false,
       message: "Failed to send message",
+    });
+  }
+};
+
+export const deleteConversationHandler = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({
+      success: false,
+      message: "Unauthorized",
+    });
+    return;
+  }
+
+  const paramResult = conversationIdParamSchema.safeParse(req.params);
+
+  if (!paramResult.success) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid conversation ID",
+      errors: paramResult.error.flatten(),
+    });
+    return;
+  }
+
+  try {
+    await deleteConversation(req.user.userId, paramResult.data.conversationId);
+
+    res.status(200).json({
+      success: true,
+      message: "Conversation deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete conversation error:", error);
+
+    if (error instanceof ChatError) {
+      res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete conversation",
     });
   }
 };

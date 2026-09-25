@@ -47,7 +47,7 @@ export interface SafeUser {
   name: string;
   email: string;
   role: "user" | "admin";
-  plan: "free" | "pro";
+  plan: "free" | "plus" | "pro";
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -60,7 +60,7 @@ export interface AuthResponse {
     name: string;
     email: string;
     role: "user" | "admin";
-    plan: "free" | "pro";
+    plan: "free" | "plus" | "pro";
   };
 }
 
