@@ -37,6 +37,12 @@ const tokenWalletSchema = new Schema<ITokenWalletDocument>(
       default: 0,
       min: 0,
     },
+
+    lastAllocatedPlan: {
+      type: String,
+      enum: ["free", "pro", "plus"],
+      default: "free",
+    },
   },
   {
     timestamps: true,

@@ -11,7 +11,7 @@ const subscriptionSchema = new Schema<ISubscriptionDocument>(
     },
     plan: {
       type: String,
-      enum: ["free", "pro"],
+      enum: ["free", "plus", "pro"],
       default: "free",
       required: true,
     },
@@ -32,7 +32,7 @@ const subscriptionSchema = new Schema<ISubscriptionDocument>(
       type: String,
       default: null,
     },
-    providerProductId: {
+    providerProductId: { 
       type: String,
       default: null,
     },

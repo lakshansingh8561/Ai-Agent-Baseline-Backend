@@ -32,7 +32,7 @@ const userSchema = new Schema<IUserDocument>(
 
     plan: {
       type: String,
-      enum: ["free", "pro"],
+      enum: ["free", "plus", "pro"],
       default: "free",
     },
 

@@ -1,6 +1,6 @@
 import type { Document, Types } from "mongoose";
 
-export type SubscriptionPlan = "free" | "pro";
+export type SubscriptionPlan = "free" | "plus" | "pro";
 
 export type SubscriptionStatus =
   | "active"

@@ -65,7 +65,7 @@ describe("Subscription Foundation & Plan Configuration Test Suite (Phase 7A)", (
     const pro = SUBSCRIPTION_PLANS.pro;
     assert.equal(pro.price, 6);
     assert.equal(pro.currency, "USD");
-    assert.equal(pro.tokensPerPeriod, 100000);
+    assert.equal(pro.tokensPerPeriod, 50000);
     assert.equal(pro.billingInterval, "month");
     assert.equal(pro.plan, "pro");
   });
@@ -371,7 +371,7 @@ describe("Subscription Foundation & Plan Configuration Test Suite (Phase 7A)", (
     assert.equal(body.data.plan, "pro");
     assert.equal(body.data.price, 6);
     assert.equal(body.data.currency, "USD");
-    assert.equal(body.data.tokensPerPeriod, 100000);
+    assert.equal(body.data.tokensPerPeriod, 50000);
     assert.equal(body.data.billingInterval, "month");
   });
 });

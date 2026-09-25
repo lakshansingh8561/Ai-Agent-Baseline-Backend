@@ -34,6 +34,8 @@ export interface SafeCheckoutSession {
   id?: string;
   status?: string;
   expiresAt?: Date | null;
+  upgradedDirectly?: boolean;
+  plan?: "plus" | "pro";
 }
 
 export interface CheckoutSessionResponse {
@@ -41,4 +43,12 @@ export interface CheckoutSessionResponse {
   message?: string;
   data: SafeCheckoutSession;
 }
+
+import { z } from "zod";
+
+export const createCheckoutSchema = z.object({
+  plan: z.enum(["plus", "pro"]).optional().default("pro"),
+});
+
+export type CreateCheckoutInput = z.infer<typeof createCheckoutSchema>;
 
