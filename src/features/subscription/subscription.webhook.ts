@@ -1,8 +1,5 @@
 import type { Request, Response } from "express";
-import {
-  validateEvent,
-  WebhookVerificationError,
-} from "@polar-sh/sdk/webhooks";
+import { Webhook, WebhookVerificationError } from "standardwebhooks";
 
 import { syncPolarSubscriptionEvent } from "./subscription.service.js";
 
@@ -15,7 +12,7 @@ export interface ProcessedWebhookResult {
 
 
 /**
- * Validates and handles incoming Polar webhook events using official @polar-sh/sdk.
+ * Validates and handles incoming Polar webhook events using standardwebhooks.
  * Operates directly on the raw unmodified request body to guarantee cryptographic integrity.
  * Strictly decoupled from token allocation; does not modify TokenWallet or token budget.
  */
@@ -69,12 +66,37 @@ export const handlePolarWebhook = async (
     }
   }
 
+  const rawBodyString = Buffer.isBuffer(rawBody)
+    ? rawBody.toString("utf-8")
+    : typeof rawBody === "string"
+    ? rawBody
+    : "";
+
   let event: any;
 
   try {
-    event = validateEvent(rawBody, headers, secret);
+    let wh: Webhook;
+    try {
+      wh = new Webhook(secret);
+      event = wh.verify(rawBodyString, headers);
+    } catch (whErr: any) {
+      if (!secret.startsWith("whsec_")) {
+        const base64Secret = Buffer.from(secret, "utf-8").toString("base64");
+        const fallbackWh = new Webhook(base64Secret);
+        event = fallbackWh.verify(rawBodyString, headers);
+      } else {
+        throw whErr;
+      }
+    }
+
+    if (typeof event === "string") {
+      event = JSON.parse(event);
+    }
   } catch (error: any) {
-    if (error instanceof WebhookVerificationError) {
+    if (
+      error instanceof WebhookVerificationError ||
+      error?.name === "WebhookVerificationError"
+    ) {
       console.warn(
         "[Polar Webhook] Signature verification failed:",
         error.message
@@ -86,26 +108,7 @@ export const handlePolarWebhook = async (
       return;
     }
 
-    // Check if it's an SDKValidationError for an unknown or unsupported event type
-    // If Polar sends an event type not in the SDK's switch table, the signature
-    // was verified successfully by standardwebhooks, but SDK parsing failed on event type.
-    const isUnknownEventType =
-      error.name === "SDKValidationError" &&
-      (error.message?.includes("Unknown event type") ||
-        error.rawMessage?.includes("Unknown event type"));
-
-    if (isUnknownEventType) {
-      console.info(
-        "[Polar Webhook] Acknowledging unsupported/unhandled Polar event type"
-      );
-      res.status(200).json({
-        success: true,
-        message: "Webhook event acknowledged (unsupported event type)",
-      });
-      return;
-    }
-
-    // Malformed JSON or schema validation error
+    // Malformed JSON or unexpected verification error
     console.warn("[Polar Webhook] Malformed payload error:", error.message);
     res.status(400).json({
       success: false,
@@ -150,6 +153,18 @@ export const handlePolarWebhook = async (
       });
       return;
     }
+  } else {
+    res.status(200).json({
+      success: true,
+      message: "Webhook event acknowledged (unsupported event type)",
+      data: {
+        eventType: event.type,
+        webhookDeliveryId,
+        providerSubscriptionId,
+        received: true,
+      },
+    });
+    return;
   }
 
   res.status(200).json({

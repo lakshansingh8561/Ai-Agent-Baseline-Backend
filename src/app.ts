@@ -1,3 +1,4 @@
+import path from "node:path";
 import express from "express";
 import cors from "cors";
 import aiRoutes from "./features/ai/ai.routes.js";
@@ -9,6 +10,9 @@ import subscriptionRoutes from "./features/subscription/subscription.routes.js";
 const app = express();
 
 app.use(cors());
+
+// Serve local upload attachments statically
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // Webhook raw body parser mounted before general JSON parsing
 app.use("/api/subscriptions/webhook", express.raw({ type: "*/*" }));

@@ -23,14 +23,12 @@ export const sendMessageSchema = z.object({
   content: z
     .string()
     .trim()
-    .min(
-      CHAT_CONSTANTS.MIN_MESSAGE_LENGTH,
-      "Message content cannot be empty"
-    )
     .max(
       CHAT_CONSTANTS.MAX_MESSAGE_LENGTH,
       `Message content must not exceed ${CHAT_CONSTANTS.MAX_MESSAGE_LENGTH} characters`
-    ),
+    )
+    .optional()
+    .default(""),
 });
 
 export const conversationIdParamSchema = z.object({

@@ -316,11 +316,20 @@ export const createCheckoutSession = async (
   const existingActiveSubForUser = await Subscription.findOne({
     userId: userObjectId,
     status: SUBSCRIPTION_STATUS.ACTIVE,
-  });
+  }).sort({ updatedAt: -1, createdAt: -1 });
 
   const isUpgrade = currentPlanRank > 0 && targetPlanRank > currentPlanRank;
 
   if (isUpgrade && existingActiveSubForUser?.providerSubscriptionId) {
+    console.log("[Polar Upgrade] Executing direct prorated subscription update", {
+      operation: "subscriptions.update",
+      environment: process.env.POLAR_ENVIRONMENT || "production",
+      targetPlan,
+      targetProductId: polarProductId,
+      subscriptionId: existingActiveSubForUser.providerSubscriptionId,
+      userId: user._id.toString(),
+    });
+
     try {
       const updated = await polarClient.subscriptions.update({
         id: existingActiveSubForUser.providerSubscriptionId,
@@ -342,6 +351,27 @@ export const createCheckoutSession = async (
 
         await allocateTokensForPlan(user._id, targetPlan);
 
+        // Deactivate any duplicate active subscriptions for this user
+        await Subscription.updateMany(
+          {
+            userId: user._id,
+            _id: { $ne: existingActiveSubForUser._id },
+            status: SUBSCRIPTION_STATUS.ACTIVE,
+          },
+          {
+            $set: {
+              status: SUBSCRIPTION_STATUS.CANCELLED,
+              cancelAtPeriodEnd: true,
+            },
+          }
+        );
+
+        console.log("[Polar Upgrade] Direct subscription update succeeded", {
+          subscriptionId: updated.id,
+          status: updated.status,
+          targetPlan,
+        });
+
         return {
           checkoutUrl: `${cleanFrontendUrl}/app/billing?checkout=success&checkout_id=${updated.id}`,
           id: updated.id,
@@ -353,13 +383,21 @@ export const createCheckoutSession = async (
       }
     } catch (apiErr: any) {
       console.warn(
-        "[Polar Direct Upgrade] Direct update not available, falling back to upgrade checkout flow:",
+        `[Polar Direct Upgrade] Direct update not available for subscription ${existingActiveSubForUser.providerSubscriptionId}, falling back to upgrade checkout flow:`,
         apiErr?.message
       );
     }
   }
 
   // 7. Create Polar Checkout Session using official SDK
+  console.log("[Polar Checkout] Creating checkout session", {
+    operation: "checkouts.create",
+    environment: process.env.POLAR_ENVIRONMENT || "production",
+    targetPlan,
+    productId: polarProductId,
+    userId: user._id.toString(),
+    isUpgrade,
+  });
   const checkoutPayload: any = {
     products: [polarProductId],
     metadata: {
@@ -701,12 +739,16 @@ export const syncPolarSubscriptionEvent = async (
   const tokensPerPeriod = planConfig.tokensPerPeriod;
 
   if (!sub) {
-    // If user has an initial free subscription with provider "none", upgrade it
+    // If user has an active subscription awaiting real providerSubscriptionId or with provider "none", upgrade it
     sub = await Subscription.findOne({
       userId: user._id,
-      provider: SUBSCRIPTION_PROVIDER.NONE,
       status: SUBSCRIPTION_STATUS.ACTIVE,
-    });
+      $or: [
+        { provider: SUBSCRIPTION_PROVIDER.NONE },
+        { providerSubscriptionId: null },
+        { providerSubscriptionId: { $exists: false } },
+      ],
+    }).sort({ updatedAt: -1, createdAt: -1 });
 
     if (sub) {
       sub.provider = SUBSCRIPTION_PROVIDER.POLAR;
@@ -753,6 +795,23 @@ export const syncPolarSubscriptionEvent = async (
     sub.currency = currency;
     sub.lastWebhookEventId = webhookDeliveryId;
     await sub.save();
+  }
+
+  // Deactivate any superseded active subscriptions for this user to guarantee single active subscription invariant
+  if (targetStatus === SUBSCRIPTION_STATUS.ACTIVE) {
+    await Subscription.updateMany(
+      {
+        userId: user._id,
+        _id: { $ne: sub._id },
+        status: SUBSCRIPTION_STATUS.ACTIVE,
+      },
+      {
+        $set: {
+          status: SUBSCRIPTION_STATUS.CANCELLED,
+          cancelAtPeriodEnd: true,
+        },
+      }
+    );
   }
 
   // 5. Update User.plan if changed
@@ -888,16 +947,22 @@ export const confirmCheckoutSession = async (
       ? "pro"
       : null;
 
+  let realSubscriptionId: string | null = null;
   if (process.env.POLAR_ACCESS_TOKEN) {
     try {
       const polarClient = getPolarClient();
       const checkout = await polarClient.checkouts.get({ id: checkoutId });
 
-      if (checkout && checkout.productId) {
-        resolvedPlan =
-          getPlanForPolarProductId(checkout.productId) ||
-          (checkout.metadata?.plan as "plus" | "pro") ||
-          resolvedPlan;
+      if (checkout) {
+        if (checkout.subscriptionId) {
+          realSubscriptionId = checkout.subscriptionId;
+        }
+        if (checkout.productId) {
+          resolvedPlan =
+            getPlanForPolarProductId(checkout.productId) ||
+            (checkout.metadata?.plan as "plus" | "pro") ||
+            resolvedPlan;
+        }
       }
     } catch (error: any) {
       const isRateLimit =
@@ -924,7 +989,7 @@ export const confirmCheckoutSession = async (
     let activeSub = await Subscription.findOne({
       userId: user._id,
       status: SUBSCRIPTION_STATUS.ACTIVE,
-    });
+    }).sort({ updatedAt: -1, createdAt: -1 });
 
     const planConfig = SUBSCRIPTION_PLANS[resolvedPlan];
     if (activeSub) {
@@ -932,15 +997,17 @@ export const confirmCheckoutSession = async (
       activeSub.price = planConfig.price;
       activeSub.tokensPerPeriod = planConfig.tokensPerPeriod;
       activeSub.provider = SUBSCRIPTION_PROVIDER.POLAR;
-      activeSub.providerSubscriptionId = activeSub.providerSubscriptionId || checkoutId;
+      if (realSubscriptionId) {
+        activeSub.providerSubscriptionId = realSubscriptionId;
+      }
       await activeSub.save();
     } else {
-      await Subscription.create({
+      activeSub = await Subscription.create({
         userId: user._id,
         plan: resolvedPlan,
         status: SUBSCRIPTION_STATUS.ACTIVE,
         provider: SUBSCRIPTION_PROVIDER.POLAR,
-        providerSubscriptionId: checkoutId,
+        providerSubscriptionId: realSubscriptionId || undefined,
         price: planConfig.price,
         currency: planConfig.currency,
         tokensPerPeriod: planConfig.tokensPerPeriod,
@@ -948,6 +1015,21 @@ export const confirmCheckoutSession = async (
         cancelAtPeriodEnd: false,
       });
     }
+
+    // Deactivate any superseded active subscriptions for this user
+    await Subscription.updateMany(
+      {
+        userId: user._id,
+        _id: { $ne: activeSub._id },
+        status: SUBSCRIPTION_STATUS.ACTIVE,
+      },
+      {
+        $set: {
+          status: SUBSCRIPTION_STATUS.CANCELLED,
+          cancelAtPeriodEnd: true,
+        },
+      }
+    );
 
     if (process.env.POLAR_ACCESS_TOKEN) {
       try {

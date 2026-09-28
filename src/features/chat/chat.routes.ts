@@ -6,6 +6,7 @@ import {
   sendMessageHandler,
   deleteConversationHandler,
 } from "./chat.controller.js";
+import { chatUploadMiddleware } from "./chat.upload.js";
 import { authMiddleware } from "../../constants/middleware/auth.middleware.js";
 
 const router = Router();
@@ -16,6 +17,10 @@ router.post("/conversations", createConversationHandler);
 router.get("/conversations", getUserConversationsHandler);
 router.delete("/conversations/:conversationId", deleteConversationHandler);
 router.get("/conversations/:conversationId/messages", getConversationMessagesHandler);
-router.post("/conversations/:conversationId/messages", sendMessageHandler);
+router.post(
+  "/conversations/:conversationId/messages",
+  chatUploadMiddleware,
+  sendMessageHandler
+);
 
 export default router;

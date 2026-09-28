@@ -14,14 +14,22 @@ export const PRIMARY_MODEL = "gemini-3.6-flash";
 export const FALLBACK_MODEL = "gemini-3.1-flash-lite";
 export const SECONDARY_FALLBACK_MODEL = "gemini-3.5-flash";
 
+export interface GeminiInlineData {
+  data: string;
+  mimeType: string;
+}
+
 export interface GeminiContentPart {
-  text: string;
+  text?: string;
+  inlineData?: GeminiInlineData;
 }
 
 export interface GeminiContent {
   role: "user" | "model";
-  parts: GeminiContentPart[];
+  parts: (GeminiContentPart | any)[];
 }
+
+export { createPartFromBase64, createPartFromText } from "@google/genai";
 
 export interface AIResponseWithUsage {
   text: string;
