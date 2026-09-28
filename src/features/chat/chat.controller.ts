@@ -198,20 +198,38 @@ export const sendMessageHandler = async (
     return;
   }
 
+  const uploadedFile = req.file;
+  const content = bodyResult.data.content?.trim() || "";
+
+  if (!uploadedFile && content.length === 0) {
+    res.status(400).json({
+      success: false,
+      message: "Message content cannot be empty",
+    });
+    return;
+  }
+
   try {
     const response = await sendMessage(
       req.user.userId,
       paramResult.data.conversationId,
-      bodyResult.data.content
+      content,
+      uploadedFile
     );
 
-    res.status(201).json({
-      success: true,
-      message: "Message processed successfully",
-      data: response,
-    });
+    if (!res.headersSent && !res.writableEnded) {
+      res.status(201).json({
+        success: true,
+        message: "Message processed successfully",
+        data: response,
+      });
+    }
   } catch (error) {
     console.error("Send message error:", error);
+
+    if (res.headersSent || res.writableEnded) {
+      return;
+    }
 
     if (
       error instanceof InsufficientTokensError ||

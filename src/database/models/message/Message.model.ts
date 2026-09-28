@@ -1,6 +1,42 @@
 import { Schema, model } from "mongoose";
 import type { IMessage } from "./message.interface.js";
 
+const attachmentSchema = new Schema(
+  {
+    type: {
+      type: String,
+      enum: ["image"],
+      required: true,
+    },
+    url: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    publicId: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+    mimeType: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    size: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
 const messageSchema = new Schema<IMessage>(
   {
     conversationId: {
@@ -25,8 +61,33 @@ const messageSchema = new Schema<IMessage>(
 
     content: {
       type: String,
-      required: true,
+      required: function (this: any) {
+        return (
+          !this.attachment &&
+          this.status !== "generating" &&
+          this.status !== "pending"
+        );
+      },
+      default: "",
       trim: true,
+    },
+
+    status: {
+      type: String,
+      enum: ["pending", "generating", "completed", "failed"],
+      default: "completed",
+      index: true,
+    },
+
+    errorMessage: {
+      type: String,
+      trim: true,
+    },
+
+    attachment: {
+      type: attachmentSchema,
+      default: undefined,
+      required: false,
     },
 
     inputTokens: {

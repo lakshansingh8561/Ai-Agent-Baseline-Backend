@@ -476,12 +476,13 @@ describe("Token Accounting Engine Test Suite", () => {
           }
         );
 
-        // Verify: Assistant message must NOT be permanently stored
+        // Verify: Completed assistant message must NOT be stored
         const assistantMessages = await Message.find({
           conversationId: conversation._id,
           role: "assistant",
+          status: "completed",
         });
-        assert.equal(assistantMessages.length, 0, "No assistant message should be persisted");
+        assert.equal(assistantMessages.length, 0, "No completed assistant message should be persisted");
 
         // Verify: No TokenUsage record created
         const usageCount = await TokenUsage.countDocuments({ userId });
@@ -678,10 +679,11 @@ describe("Token Accounting Engine Test Suite", () => {
         assert.equal(wallet?.balance, initialBalance, "Balance must be restored to initial");
         assert.equal(wallet?.totalUsed, 0, "User must not be charged");
 
-        // Verify no assistant message or TokenUsage was created
+        // Verify no completed assistant message or TokenUsage was created
         const assistantMessages = await Message.find({
           conversationId: conversation._id,
           role: "assistant",
+          status: "completed",
         });
         assert.equal(assistantMessages.length, 0);
 
@@ -745,8 +747,9 @@ describe("Token Accounting Engine Test Suite", () => {
         const assistantMessages = await Message.find({
           conversationId: conversation._id,
           role: "assistant",
+          status: "completed",
         });
-        assert.equal(assistantMessages.length, 0, "No assistant message must be stored");
+        assert.equal(assistantMessages.length, 0, "No completed assistant message must be stored");
 
         // Verify: No TokenUsage stored
         const usages = await TokenUsage.find({ userId });
