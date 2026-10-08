@@ -333,9 +333,17 @@ export const sendMessage = async (
     let aiResult: AIResponseWithUsage;
 
     try {
+      // Gemini reasoning models count internal thinking tokens towards totalTokenCount
+      // but maxOutputTokens only limits visible candidate text.
+      // We leave headroom so totalTokens strictly stays within allowedOutputTokens and reservedAmount.
+      const safeOutputTokens = Math.max(
+        16,
+        Math.floor(allowedOutputTokens * 0.65)
+      );
+
       aiResult = await _internalAI.generateAIResponseWithUsage(
         geminiContents,
-        allowedOutputTokens
+        safeOutputTokens
       );
     } catch (aiError: any) {
       console.error("Gemini invocation failed in chat service:", aiError);
@@ -504,36 +512,60 @@ export const deleteConversation = async (
   userId: string,
   conversationId: string
 ): Promise<void> => {
-  const conversation = await findUserConversationById(conversationId, userId);
-
-  // Find messages with attachments to clean up Cloudinary assets (and legacy disk files)
-  const messagesWithAttachments = await Message.find({
-    conversationId: conversation._id,
-    "attachment.url": { $exists: true, $ne: null },
-  });
-
-  for (const msg of messagesWithAttachments) {
-    if (msg.attachment?.publicId) {
-      try {
-        await deleteChatImage(msg.attachment.publicId);
-      } catch (err) {
-        console.error(`Failed to delete Cloudinary image ${msg.attachment.publicId}:`, err);
-      }
-    } else if (msg.attachment?.url) {
-      const localFilePath = path.join(
-        process.cwd(),
-        msg.attachment.url.replace(/^\//, "")
-      );
-      if (fs.existsSync(localFilePath)) {
-        fs.promises.unlink(localFilePath).catch(() => {});
-      }
-    }
+  if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+    throw new ChatError("Invalid conversation ID format", 400);
   }
 
-  // Delete all messages belonging to this conversation
-  await Message.deleteMany({ conversationId: conversation._id });
+  const convIdObj = new mongoose.Types.ObjectId(conversationId);
 
-  // Delete the conversation document
-  await Conversation.deleteOne({ _id: conversation._id });
+  // 1. Find conversation by ID
+  const conversation = await Conversation.findById(convIdObj);
+
+  if (conversation) {
+    // 2. Validate ownership safely
+    const convUserIdStr = conversation.userId?.toString();
+    const currentUserIdStr = userId.toString();
+
+    if (convUserIdStr && convUserIdStr !== currentUserIdStr) {
+      throw new ChatError("Unauthorized to delete this conversation", 403);
+    }
+
+    // 3. Find messages with attachments to clean up Cloudinary assets (and legacy disk files)
+    try {
+      const messagesWithAttachments = await Message.find({
+        conversationId: conversation._id,
+        "attachment.url": { $exists: true, $ne: null },
+      });
+
+      for (const msg of messagesWithAttachments) {
+        if (msg.attachment?.publicId) {
+          try {
+            await deleteChatImage(msg.attachment.publicId);
+          } catch (err) {
+            console.error(`Failed to delete Cloudinary image:`, err);
+          }
+        } else if (msg.attachment?.url) {
+          const localFilePath = path.join(
+            process.cwd(),
+            msg.attachment.url.replace(/^\//, "")
+          );
+          if (fs.existsSync(localFilePath)) {
+            fs.promises.unlink(localFilePath).catch(() => {});
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error inspecting attachments for deletion:", err);
+    }
+
+    // 4. Delete all messages belonging to this conversation
+    await Message.deleteMany({ conversationId: conversation._id });
+
+    // 5. Delete the conversation document
+    await Conversation.deleteOne({ _id: conversation._id });
+  } else {
+    // Idempotent cleanup: ensure no orphaned messages remain
+    await Message.deleteMany({ conversationId: convIdObj });
+  }
 };
 
