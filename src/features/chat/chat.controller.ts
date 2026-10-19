@@ -4,10 +4,16 @@ import {
   getUserConversations,
   getConversationMessages,
   sendMessage,
+  sendMessageStream,
   deleteConversation,
   ChatError,
 } from "./chat.service.js";
 import { TokenError, InsufficientTokensError } from "../token/index.js";
+import {
+  isGeminiQuotaExhaustedError,
+  extractRetryDelay,
+  sanitizeErrorMessage,
+} from "../ai/ai.service.js";
 import {
   createConversationSchema,
   sendMessageSchema,
@@ -164,6 +170,10 @@ export const getConversationMessagesHandler = async (
   }
 };
 
+export const formatSSEEvent = (event: string, data: any): string => {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+};
+
 export const sendMessageHandler = async (
   req: Request,
   res: Response
@@ -209,25 +219,151 @@ export const sendMessageHandler = async (
     return;
   }
 
+  const rawIdempotencyKey =
+    req.header("Idempotency-Key") || req.header("X-Idempotency-Key");
+  const idempotencyKey =
+    typeof rawIdempotencyKey === "string" && rawIdempotencyKey.trim().length > 0
+      ? rawIdempotencyKey.trim()
+      : undefined;
+
+  const isSSE = (req.headers.accept || "").includes("text/event-stream");
+
+  if (isSSE) {
+    const abortController = new AbortController();
+
+    if (typeof (res as any).on === "function") {
+      res.on("close", () => {
+        if (!res.writableEnded) {
+          abortController.abort();
+        }
+      });
+    }
+
+    try {
+      res.status(200);
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      if ((res as any).flushHeaders) {
+        (res as any).flushHeaders();
+      }
+
+      // Establish stream with initial ping
+      res.write(formatSSEEvent("ping", { timestamp: Date.now() }));
+
+      await sendMessageStream(
+        req.user.userId,
+        paramResult.data.conversationId,
+        content,
+        uploadedFile,
+        idempotencyKey,
+        {
+          onMetadata: (meta) => {
+            if (!res.writableEnded) {
+              res.write(formatSSEEvent("metadata", meta));
+            }
+          },
+          onDelta: (delta) => {
+            if (!res.writableEnded) {
+              res.write(formatSSEEvent("delta", delta));
+            }
+          },
+          onDone: (done) => {
+            if (!res.writableEnded) {
+              res.write(formatSSEEvent("done", done));
+              res.end();
+            }
+          },
+          onError: (err) => {
+            if (!res.writableEnded) {
+              res.write(formatSSEEvent("error", err));
+              res.end();
+            }
+          },
+        },
+        abortController.signal
+      );
+      if (!res.writableEnded) {
+        res.end();
+      }
+      return;
+    } catch (error) {
+      console.error("Send message stream error:", sanitizeErrorMessage((error as any)?.message || ""));
+
+      if (res.headersSent || res.writableEnded) {
+        if (!res.writableEnded) {
+          const isQuota =
+            isGeminiQuotaExhaustedError(error) ||
+            (error as any)?.statusCode === 429;
+          const retryDelay = extractRetryDelay(error);
+          const message = isQuota
+            ? "AI model quota or rate limit exceeded. Please try again shortly."
+            : error instanceof Error
+            ? sanitizeErrorMessage(error.message)
+            : "Internal stream error";
+          const statusCode = isQuota ? 429 : (error as any).statusCode || 500;
+          res.write(
+            formatSSEEvent("error", {
+              code: isQuota ? "RESOURCE_EXHAUSTED" : "STREAM_ERROR",
+              message,
+              statusCode,
+              ...(retryDelay ? { retryAfter: retryDelay } : {}),
+            })
+          );
+          res.end();
+        }
+        return;
+      }
+      // If headers were not yet sent, fall through to standard error handler below
+    }
+  }
+
   try {
     const response = await sendMessage(
       req.user.userId,
       paramResult.data.conversationId,
       content,
-      uploadedFile
+      uploadedFile,
+      idempotencyKey
     );
 
+    if (response.isReplay) {
+      res.setHeader("Idempotent-Replay", "true");
+    }
+
     if (!res.headersSent && !res.writableEnded) {
-      res.status(201).json({
+      const statusCode = response.statusCode || 201;
+      res.status(statusCode).json({
         success: true,
-        message: "Message processed successfully",
-        data: response,
+        message: response.isReplay
+          ? "Message retrieved from idempotent cache"
+          : "Message processed successfully",
+        data: {
+          userMessage: response.userMessage,
+          assistantMessage: response.assistantMessage,
+        },
       });
     }
   } catch (error) {
-    console.error("Send message error:", error);
+    console.error("Send message error:", sanitizeErrorMessage((error as any)?.message || ""));
 
     if (res.headersSent || res.writableEnded) {
+      return;
+    }
+
+    if (
+      isGeminiQuotaExhaustedError(error) ||
+      (error as any)?.statusCode === 429 ||
+      (error instanceof ChatError && error.statusCode === 429)
+    ) {
+      const retryDelay = extractRetryDelay(error);
+      res.status(429).json({
+        success: false,
+        code: "RESOURCE_EXHAUSTED",
+        message: "AI model quota or rate limit exceeded. Please try again shortly.",
+        ...(retryDelay ? { retryAfter: retryDelay } : {}),
+      });
       return;
     }
 

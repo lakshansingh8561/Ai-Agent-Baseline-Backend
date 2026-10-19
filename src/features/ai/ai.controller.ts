@@ -14,7 +14,7 @@ export const generateAI = async (
       message: "Invalid request",
       errors: result.error.flatten(),
     });
-
+               
     return;
   }
 

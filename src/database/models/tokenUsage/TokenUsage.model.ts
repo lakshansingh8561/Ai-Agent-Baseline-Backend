@@ -51,6 +51,23 @@ const tokenUsageSchema = new Schema<ITokenUsage>(
       enum: ["chat"],
       required: true,
     },
+
+    usageVerification: {
+      type: String,
+      enum: [
+        "AUTHORITATIVE",
+        "UNVERIFIED_INPUT_ONLY",
+        "INVALID_METADATA_FALLBACK",
+        "EXCESS_CLAMPED",
+        "ABORTED_PROMPT_ONLY",
+      ],
+      default: "AUTHORITATIVE",
+    },
+
+    providerTotalTokens: {
+      type: Number,
+      min: 0,
+    },
   },
   {
     timestamps: true,

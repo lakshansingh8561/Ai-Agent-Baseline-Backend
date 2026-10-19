@@ -67,6 +67,11 @@ const subscriptionSchema = new Schema<ISubscriptionDocument>(
       type: String,
       default: null,
     },
+    lastCheckoutId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   {
     timestamps: true,

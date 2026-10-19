@@ -3,6 +3,7 @@ import {
   Subscription,
   type SubscriptionStatus,
 } from "../../database/models/subscription/index.js";
+import { TokenAllocation } from "../../database/models/tokenAllocation/index.js";
 import { User, type IUserDocument } from "../../database/models/user/index.js";
 import {
   SUBSCRIPTION_PLANS,
@@ -129,7 +130,16 @@ export const getUserSubscription = async (
           await activeSub.save();
           await User.findByIdAndUpdate(userObjectId, { plan: remotePlan });
           if (remotePlan === "pro" || remotePlan === "plus") {
-            await allocateTokensForPlan(userObjectId, remotePlan);
+            const rawPeriodStart = remoteSub?.currentPeriodStart || (remoteSub as any)?.current_period_start;
+            const periodStart = rawPeriodStart ? new Date(rawPeriodStart) : (activeSub.currentPeriodStart || new Date());
+            const allocationKey = `polar:sub:${activeSub.providerSubscriptionId}:${new Date(periodStart).toISOString()}:${remotePlan}`;
+            await allocateTokensForPlan(userObjectId, remotePlan, {
+              allocationKey,
+              provider: "polar",
+              providerSubscriptionId: activeSub.providerSubscriptionId,
+              periodStart,
+              periodEnd: remoteSub?.currentPeriodEnd ? new Date(remoteSub.currentPeriodEnd) : activeSub.currentPeriodEnd,
+            });
           }
         }
       }
@@ -349,7 +359,16 @@ export const createCheckoutSession = async (
         user.plan = targetPlan;
         await user.save();
 
-        await allocateTokensForPlan(user._id, targetPlan);
+        const rawPeriodStart = updated.currentPeriodStart || (updated as any)?.current_period_start;
+        const periodStart = rawPeriodStart ? new Date(rawPeriodStart) : (existingActiveSubForUser.currentPeriodStart || new Date());
+        const allocationKey = `polar:sub:${existingActiveSubForUser.providerSubscriptionId}:${new Date(periodStart).toISOString()}:${targetPlan}`;
+        await allocateTokensForPlan(user._id, targetPlan, {
+          allocationKey,
+          provider: "polar",
+          providerSubscriptionId: existingActiveSubForUser.providerSubscriptionId,
+          periodStart,
+          periodEnd: updated.currentPeriodEnd ? new Date(updated.currentPeriodEnd) : existingActiveSubForUser.currentPeriodEnd,
+        });
 
         // Deactivate any duplicate active subscriptions for this user
         await Subscription.updateMany(
@@ -822,7 +841,45 @@ export const syncPolarSubscriptionEvent = async (
 
   // 6. Authoritatively allocate plan tokens if active paid subscription
   if (targetStatus === SUBSCRIPTION_STATUS.ACTIVE && (targetUserPlan === "pro" || targetUserPlan === "plus")) {
-    await allocateTokensForPlan(user._id, targetUserPlan);
+    const allocationKey = `polar:sub:${polarSubscriptionId}:${currentPeriodStart.toISOString()}:${targetUserPlan}`;
+
+    // If this purchase was already allocated via checkout confirmation, link the keys
+    const chId = polarSub.checkout_id || polarSub.checkoutId || polarSub.metadata?.checkoutId || sub?.lastCheckoutId;
+    if (chId) {
+      const existingCheckoutAlloc = await TokenAllocation.findOne({
+        $or: [
+          { checkoutId: chId },
+          { allocationKey: `polar:checkout:${chId}:${targetUserPlan}` },
+        ],
+      });
+      if (existingCheckoutAlloc) {
+        try {
+          await TokenAllocation.create({
+            userId: user._id,
+            allocationKey,
+            checkoutId: chId,
+            plan: targetUserPlan,
+            allocatedTokens: existingCheckoutAlloc.allocatedTokens,
+            provider: "polar",
+            providerSubscriptionId: polarSubscriptionId,
+            periodStart: currentPeriodStart,
+            periodEnd: currentPeriodEnd,
+            status: "APPLIED",
+          });
+        } catch (e) {
+          // ignore duplicate race
+        }
+      }
+    }
+
+    await allocateTokensForPlan(user._id, targetUserPlan, {
+      allocationKey,
+      checkoutId: chId || undefined,
+      provider: "polar",
+      providerSubscriptionId: polarSubscriptionId,
+      periodStart: currentPeriodStart,
+      periodEnd: currentPeriodEnd,
+    });
   }
 
   return {
@@ -982,8 +1039,20 @@ export const confirmCheckoutSession = async (
       await user.save();
     }
 
-    // Authoritatively allocate plan tokens (50,000 for pro, 100,000 for plus)
-    await allocateTokensForPlan(user._id, resolvedPlan);
+    // Fetch remote subscription period start if realSubscriptionId is available from Polar
+    let currentPeriodStart = new Date();
+    if (realSubscriptionId && process.env.POLAR_ACCESS_TOKEN) {
+      try {
+        const polarClient = getPolarClient();
+        const remoteSub = await polarClient.subscriptions.get({ id: realSubscriptionId });
+        if (remoteSub) {
+          const rawStart = remoteSub.currentPeriodStart || (remoteSub as any).current_period_start;
+          if (rawStart) currentPeriodStart = new Date(rawStart);
+        }
+      } catch (subErr: any) {
+        // Fallback to activeSub or current timestamp if remote get fails
+      }
+    }
 
     // Ensure active Subscription record exists
     let activeSub = await Subscription.findOne({
@@ -997,8 +1066,12 @@ export const confirmCheckoutSession = async (
       activeSub.price = planConfig.price;
       activeSub.tokensPerPeriod = planConfig.tokensPerPeriod;
       activeSub.provider = SUBSCRIPTION_PROVIDER.POLAR;
+      activeSub.lastCheckoutId = checkoutId;
       if (realSubscriptionId) {
         activeSub.providerSubscriptionId = realSubscriptionId;
+      }
+      if (activeSub.currentPeriodStart && !realSubscriptionId) {
+        currentPeriodStart = activeSub.currentPeriodStart;
       }
       await activeSub.save();
     } else {
@@ -1008,13 +1081,27 @@ export const confirmCheckoutSession = async (
         status: SUBSCRIPTION_STATUS.ACTIVE,
         provider: SUBSCRIPTION_PROVIDER.POLAR,
         providerSubscriptionId: realSubscriptionId || undefined,
+        lastCheckoutId: checkoutId,
         price: planConfig.price,
         currency: planConfig.currency,
         tokensPerPeriod: planConfig.tokensPerPeriod,
-        currentPeriodStart: new Date(),
+        currentPeriodStart,
         cancelAtPeriodEnd: false,
       });
     }
+
+    // Authoritatively and idempotently allocate plan tokens
+    const allocationKey = realSubscriptionId
+      ? `polar:sub:${realSubscriptionId}:${currentPeriodStart.toISOString()}:${resolvedPlan}`
+      : `polar:checkout:${checkoutId}:${resolvedPlan}`;
+
+    await allocateTokensForPlan(user._id, resolvedPlan, {
+      allocationKey,
+      checkoutId,
+      provider: "polar",
+      providerSubscriptionId: realSubscriptionId,
+      periodStart: currentPeriodStart,
+    });
 
     // Deactivate any superseded active subscriptions for this user
     await Subscription.updateMany(

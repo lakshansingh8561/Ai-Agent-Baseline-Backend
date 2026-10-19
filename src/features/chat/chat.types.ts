@@ -32,3 +32,44 @@ export interface SendMessageResponse {
   userMessage: SafeMessage;
   assistantMessage: SafeMessage;
 }
+
+export interface SendMessageResult extends SendMessageResponse {
+  isReplay?: boolean;
+  statusCode?: number;
+}
+
+export interface SSEPingEvent {
+  timestamp: number;
+}
+
+export interface SSEMetadataEvent {
+  conversationId: string;
+  userMessageId: string;
+  assistantMessageId: string;
+  model: string;
+}
+
+export interface SSEDeltaEvent {
+  content: string;
+  index?: number;
+}
+
+export interface SSEDoneEvent {
+  conversationId: string;
+  userMessage: SafeMessage;
+  assistantMessage: SafeMessage;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    model: string;
+  };
+  status: "completed";
+  isReplay?: boolean;
+}
+
+export interface SSEErrorEvent {
+  code: string;
+  message: string;
+  statusCode: number;
+}
