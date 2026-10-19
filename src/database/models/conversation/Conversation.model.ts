@@ -16,6 +16,30 @@ const conversationSchema = new Schema<IConversation>(
       trim: true,
       maxlength: 200,
     },
+
+    activeGenerationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
+    activeLockToken: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    lockVersion: {
+      type: Number,
+      default: 0,
+      required: true,
+      min: 0,
+    },
+
+    lockExpiresAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -23,6 +47,7 @@ const conversationSchema = new Schema<IConversation>(
 );
 
 conversationSchema.index({ userId: 1, updatedAt: -1 });
+conversationSchema.index({ activeGenerationId: 1, lockExpiresAt: 1 });
 
 export const Conversation = model<IConversation>(
   "Conversation",

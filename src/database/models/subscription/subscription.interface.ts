@@ -24,6 +24,7 @@ export interface ISubscription {
   currentPeriodEnd?: Date | null;
   cancelAtPeriodEnd: boolean;
   lastWebhookEventId?: string | null;
+  lastCheckoutId?: string | null;
 }
 
 

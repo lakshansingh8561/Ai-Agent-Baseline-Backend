@@ -151,9 +151,17 @@ export const register = async (input: RegisterInput): Promise<AuthResponse> => {
 };
 
 export const login = async (input: LoginInput): Promise<AuthResponse> => {
-  const user = await User.findOne({
-    email: input.email,
+  const normalizedEmail = input.email.trim().toLowerCase();
+  let user = await User.findOne({
+    email: normalizedEmail,
   });
+
+  if (!user) {
+    const escaped = normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    user = await User.findOne({
+      email: { $regex: new RegExp(`^${escaped}$`, "i") },
+    });
+  }
 
   if (!user) {
     throw new AuthError("Invalid email or password", 401);
